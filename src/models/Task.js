@@ -17,6 +17,7 @@ const taskStepSchema = new mongoose.Schema({
 });
 
 const taskSchema = new mongoose.Schema({
+  publicId: { type: String, unique: true, sparse: true, index: true },
   userId: { type: String, required: true, index: true },
   description: { type: String, required: true },
   status: { 
@@ -47,6 +48,7 @@ export const Task = mongoose.model('Task', taskSchema);
 
 // Session Schema for tracking user assistance sessions
 const sessionSchema = new mongoose.Schema({
+  publicId: { type: String, unique: true, sparse: true, index: true },
   userId: { type: String, required: true, index: true },
   taskId: { type: mongoose.Schema.Types.ObjectId, ref: 'Task' },
   sessionStartTime: { type: Date, default: Date.now },

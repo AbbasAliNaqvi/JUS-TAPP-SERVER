@@ -1,6 +1,37 @@
 import { Task, Session } from '../models/Task.js';
 import TaskPlanService from '../services/taskPlanService.js';
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
+
+const buildTaskLookup = (taskId) => (
+  mongoose.isValidObjectId(taskId)
+    ? { $or: [{ _id: taskId }, { publicId: taskId }] }
+    : { publicId: taskId }
+);
+
+const buildSessionLookup = (sessionId) => (
+  mongoose.isValidObjectId(sessionId)
+    ? { $or: [{ _id: sessionId }, { publicId: sessionId }] }
+    : { publicId: sessionId }
+);
+
+const notFoundError = (entity) => {
+  const error = new Error(`${entity} not found`);
+  error.statusCode = 404;
+  return error;
+};
+
+const serializeTask = (task) => ({
+  ...task.toObject(),
+  taskId: task.publicId || task._id.toString(),
+  mongoId: task._id.toString()
+});
+
+const serializeSession = (session) => ({
+  ...session.toObject(),
+  sessionId: session.publicId || session._id.toString(),
+  mongoId: session._id.toString()
+});
 
 export const generateTaskPlan = async (taskDescription, userId, language = 'en') => {
   try {
@@ -50,6 +81,7 @@ export const generateTaskPlan = async (taskDescription, userId, language = 'en')
 
     // Save task to database
     const task = new Task({
+      publicId: `task_${uuidv4().split('-')[0]}`,
       userId,
       description: taskDescription,
       status: 'planning',
@@ -76,7 +108,8 @@ export const generateTaskPlan = async (taskDescription, userId, language = 'en')
     return {
       success: true,
       plan: {
-        taskId: task._id.toString(),
+        taskId: task.publicId,
+        mongoId: task._id.toString(),
         description: task.description,
         appPackageName: task.appPackageName,
         steps: task.steps,
@@ -101,11 +134,11 @@ export const generateTaskPlan = async (taskDescription, userId, language = 'en')
 
 export const getTask = async (taskId) => {
   try {
-    const task = await Task.findById(taskId);
+    const task = await Task.findOne(buildTaskLookup(taskId));
     if (!task) {
-      throw new Error('Task not found');
+      throw notFoundError('Task');
     }
-    return task;
+    return serializeTask(task);
   } catch (error) {
     console.error('Error fetching task:', error);
     throw error;
@@ -114,9 +147,9 @@ export const getTask = async (taskId) => {
 
 export const updateTaskStep = async (taskId, stepIndex, status) => {
   try {
-    const task = await Task.findById(taskId);
+    const task = await Task.findOne(buildTaskLookup(taskId));
     if (!task) {
-      throw new Error('Task not found');
+      throw notFoundError('Task');
     }
 
     if (stepIndex < 0 || stepIndex >= task.steps.length) {
@@ -143,7 +176,7 @@ export const updateTaskStep = async (taskId, stepIndex, status) => {
     }
 
     await task.save();
-    return task;
+    return serializeTask(task);
   } catch (error) {
     console.error('Error updating task step:', error);
     throw error;
@@ -152,16 +185,17 @@ export const updateTaskStep = async (taskId, stepIndex, status) => {
 
 export const getMasterStep = async (taskId) => {
   try {
-    const task = await Task.findById(taskId);
+    const task = await Task.findOne(buildTaskLookup(taskId));
     if (!task) {
-      throw new Error('Task not found');
+      throw notFoundError('Task');
     }
 
     const nextStep = task.steps.find(step => step.status !== 'completed') || null;
     const highlightText = nextStep?.matchText || nextStep?.targetElement || nextStep?.instruction || '';
 
     return {
-      taskId: task._id.toString(),
+      taskId: task.publicId || task._id.toString(),
+      mongoId: task._id.toString(),
       status: task.status,
       currentStepIndex: task.currentStepIndex,
       totalSteps: task.steps.length,
@@ -184,7 +218,7 @@ export const getUserTasks = async (userId, limit = 20, skip = 0) => {
     const total = await Task.countDocuments({ userId });
 
     return {
-      tasks,
+      tasks: tasks.map(serializeTask),
       total,
       limit,
       skip,
@@ -198,15 +232,21 @@ export const getUserTasks = async (userId, limit = 20, skip = 0) => {
 
 export const createSession = async (userId, taskId, deviceInfo = {}) => {
   try {
+    const task = taskId ? await Task.findOne(buildTaskLookup(taskId)) : null;
+    if (taskId && !task) {
+      throw notFoundError('Task');
+    }
+
     const session = new Session({
+      publicId: `session_${uuidv4().split('-')[0]}`,
       userId,
-      taskId,
+      taskId: task?._id,
       deviceInfo,
       sessionStartTime: new Date()
     });
 
     await session.save();
-    return session;
+    return serializeSession(session);
   } catch (error) {
     console.error('Error creating session:', error);
     throw error;
@@ -215,17 +255,17 @@ export const createSession = async (userId, taskId, deviceInfo = {}) => {
 
 export const updateSession = async (sessionId, updates) => {
   try {
-    const session = await Session.findByIdAndUpdate(
-      sessionId,
+    const session = await Session.findOneAndUpdate(
+      buildSessionLookup(sessionId),
       updates,
       { new: true }
     );
     
     if (!session) {
-      throw new Error('Session not found');
+      throw notFoundError('Session');
     }
 
-    return session;
+    return serializeSession(session);
   } catch (error) {
     console.error('Error updating session:', error);
     throw error;
@@ -239,7 +279,7 @@ export const getUserSessions = async (userId, limit = 50) => {
       .limit(limit)
       .populate('taskId', 'description status');
 
-    return sessions;
+    return sessions.map(serializeSession);
   } catch (error) {
     console.error('Error fetching user sessions:', error);
     throw error;
