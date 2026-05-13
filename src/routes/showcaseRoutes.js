@@ -1,7 +1,7 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getFeatureImportance, getSystemAdaptiveAnalytics } from '../services/analyticsService.js';
-import * as taskController from '../controllers/taskController.js';
+import { generateShowcasePlan, generateShowcasePlans } from '../services/showcasePlanService.js';
 
 const router = express.Router();
 
@@ -85,39 +85,16 @@ router.post('/adaptive-plan', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'taskDescription is required' });
     }
 
-    const confusionLevel = userType === 'independent'
-      ? 'independent_user'
-      : userType === 'assisted'
-        ? 'moderate_assistance_needed'
-        : 'critical_guidance_required';
-
-    const result = await taskController.generateAdaptiveTaskPlan({
-      taskDescription,
-      userId: 'showcase-user',
-      language,
-      confusionLevel,
-      userCategory: userType,
-      currentScreen: 'showcase'
-    });
-
-    const steps = result?.plan?.steps || [];
+    const plan = await generateShowcasePlan({ taskDescription, userType, language });
     res.json({
       success: true,
       userType,
-      confusionLevel,
-      plan: {
-        title: result?.plan?.description || taskDescription,
-        appPackageName: result?.plan?.appPackageName || '',
-        estimatedDuration: result?.plan?.estimatedDuration || 0,
-        steps: steps.map((step, index) => ({
-          stepIndex: step.stepIndex ?? index,
-          instruction: step.instruction || step.targetElement || '',
-          actionType: step.actionType || 'tap',
-          targetElement: step.targetElement || '',
-          matchText: step.matchText || step.targetElement || '',
-          targetAppPackage: step.targetAppPackage || result?.plan?.appPackageName || ''
-        }))
-      }
+      confusionLevel: userType === 'independent'
+        ? 'independent_user'
+        : userType === 'assisted'
+          ? 'moderate_assistance_needed'
+          : 'critical_guidance_required',
+      plan
     });
   } catch (error) {
     next(error);
@@ -131,48 +108,11 @@ router.post('/adaptive-plans', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'taskDescription is required' });
     }
 
-    const modes = ['independent', 'assisted', 'guided'];
-    const plans = await Promise.all(
-      modes.map(async (userType) => {
-        const confusionLevel = userType === 'independent'
-          ? 'independent_user'
-          : userType === 'assisted'
-            ? 'moderate_assistance_needed'
-            : 'critical_guidance_required';
-
-        const result = await taskController.generateAdaptiveTaskPlan({
-          taskDescription,
-          userId: 'showcase-user',
-          language,
-          confusionLevel,
-          userCategory: userType,
-          currentScreen: 'showcase'
-        });
-
-        const steps = result?.plan?.steps || [];
-        return [
-          userType,
-          {
-            title: result?.plan?.description || taskDescription,
-            appPackageName: result?.plan?.appPackageName || '',
-            estimatedDuration: result?.plan?.estimatedDuration || 0,
-            steps: steps.map((step, index) => ({
-              stepIndex: step.stepIndex ?? index,
-              instruction: step.instruction || step.targetElement || '',
-              actionType: step.actionType || 'tap',
-              targetElement: step.targetElement || '',
-              matchText: step.matchText || step.targetElement || '',
-              targetAppPackage: step.targetAppPackage || result?.plan?.appPackageName || ''
-            }))
-          }
-        ];
-      })
-    );
-
+    const plans = await generateShowcasePlans({ taskDescription, language });
     res.json({
       success: true,
       taskDescription,
-      plans: Object.fromEntries(plans)
+      plans
     });
   } catch (error) {
     next(error);

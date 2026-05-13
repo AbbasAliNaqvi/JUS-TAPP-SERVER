@@ -4,10 +4,11 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY frontend ./frontend
 
 # Install dependencies
 ENV NODE_ENV=production
-RUN npm ci --omit=dev
+RUN npm ci && npm run build
 
 # Copy application
 COPY src ./src
