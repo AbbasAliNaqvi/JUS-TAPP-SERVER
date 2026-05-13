@@ -6,12 +6,15 @@ WORKDIR /app
 COPY package*.json ./
 COPY frontend ./frontend
 
-# Install dependencies
-ENV NODE_ENV=production
-RUN npm ci && npm run build
+# Install dependencies and build frontend
+RUN npm ci
+RUN npm run build
 
 # Copy application
 COPY src ./src
+
+# Production runtime
+ENV NODE_ENV=production
 
 # Expose port
 EXPOSE 5000
