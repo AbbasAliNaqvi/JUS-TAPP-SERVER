@@ -87,3 +87,51 @@ Thumbs.db
 
 # Misc
 .tern-port
+
+# =========================
+# ML / Python artifacts
+# =========================
+
+# Python virtual environments
+venv/
+.env/
+.envs/
+ENV/
+env/
+.venv/
+mlvenv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ML outputs / artifacts
+ml/artifacts/
+ml/data/
+*.tflite
+*.h5
+*.pkl
+*.joblib
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# TensorFlow / PyTorch caches
+.keras/
+torch/
+.torch/
+
+# Model export / training logs
+ml/logs/
+ml/checkpoints/
+ml/models/
+
+# HuggingFace cache (if used later)
+.cache/huggingface/
+
+# Large dataset files (optional safety)
+*.csv
+*.parquet
+*.jsonl

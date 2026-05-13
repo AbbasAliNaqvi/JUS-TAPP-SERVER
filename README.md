@@ -31,7 +31,21 @@ The `TaskPlanService` supports:
 
 Automatically falls back if one provider fails.
 
-### 2. Task Planning
+### 2. Adaptive Intelligence Layer
+
+The backend now supports behavior-aware guidance for the existing Kotlin Android app:
+
+- Interaction event logging from Accessibility Service
+- Confusion prediction across four assistance levels
+- Adaptive overlay instructions based on user behavior
+- Guidance versions for analytics and debugging
+- ML training/TFLite workflow for future model upgrades
+
+Kotlin integration contract: [`API_HANDOFF_FOR_KOTLIN.md`](./API_HANDOFF_FOR_KOTLIN.md)
+
+ML pipeline guide: [`ML_PIPELINE.md`](./ML_PIPELINE.md)
+
+### 3. Task Planning
 
 Takes natural language input:
 ```
@@ -48,7 +62,7 @@ Returns structured plan:
 }
 ```
 
-### 3. Session Tracking
+### 4. Session Tracking
 
 Stores:
 - Task execution history

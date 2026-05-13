@@ -96,6 +96,130 @@ export class TaskPlanService {
     }
   }
 
+  static async generateAdaptiveTaskPlan(taskDescription, userId, {
+    language = 'en',
+    confusionLevel = 'independent_user',
+    userCategory = 'moderate',
+    currentScreen = '',
+    recentBehavior = {}
+  } = {}) {
+    const prompt = this.buildAdaptiveTaskPrompt(taskDescription, {
+      language,
+      confusionLevel,
+      userCategory,
+      currentScreen,
+      recentBehavior
+    });
+
+    if (process.env.GROQ_API_KEY) {
+      try {
+        const apiKey = this.getNextGroqKey();
+        const response = await axios.post(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            model: process.env.GROQ_MODEL || 'llama-3.1-8b-instant',
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 1400,
+            temperature: 0.25
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        return this.parseTaskPlan(response.data.choices[0].message.content, taskDescription);
+      } catch (error) {
+        console.warn('Adaptive Groq generation failed:', error.message);
+      }
+    }
+
+    return this.expandPlanForAssistanceLevel(
+      this.generateFallbackPlan(taskDescription),
+      confusionLevel
+    );
+  }
+
+  static buildAdaptiveTaskPrompt(taskDescription, {
+    language = 'en',
+    confusionLevel = 'independent_user',
+    userCategory = 'moderate',
+    currentScreen = '',
+    recentBehavior = {}
+  } = {}) {
+    const detailRules = {
+      independent_user: 'Use short concise steps. Avoid extra explanation.',
+      moderate_assistance_needed: 'Use simple language and include one visible target per step.',
+      high_assistance_needed: 'Use detailed screen landmarks, exact labels, and clear waiting instructions.',
+      critical_guidance_required: 'Use micro-steps, slow pacing, voice-friendly wording, large highlight targets, and contextual explanations.'
+    };
+
+    return `
+You are the adaptive guidance intelligence for JUS TAPP, an Android Accessibility Service overlay assistant.
+
+Task: "${taskDescription}"
+Language: ${language}
+User category: ${userCategory}
+Predicted confusion level: ${confusionLevel}
+Current screen: ${currentScreen || 'unknown'}
+Recent behavior metrics: ${JSON.stringify(recentBehavior)}
+
+Instruction policy:
+${detailRules[confusionLevel] || detailRules.independent_user}
+
+Return ONLY valid JSON:
+{
+  "appPackageName": "android.package.name",
+  "steps": [
+    {
+      "stepIndex": 0,
+      "instruction": "elderly-friendly instruction",
+      "actionType": "tap",
+      "targetElement": "visible UI element",
+      "matchText": "exact visible text or accessibility label"
+    }
+  ],
+  "estimatedDuration": 60
+}
+
+Allowed actionType values: tap, swipe, input, scroll, openApp, long-press, double-tap, drag, wait, voice-input.
+Every step must have targetElement and matchText.
+For critical users, split complex actions into smaller steps.
+    `;
+  }
+
+  static expandPlanForAssistanceLevel(plan, confusionLevel) {
+    if (!['high_assistance_needed', 'critical_guidance_required'].includes(confusionLevel)) {
+      return plan;
+    }
+
+    const expandedSteps = [];
+    for (const step of plan.steps || []) {
+      if (confusionLevel === 'critical_guidance_required' && step.actionType !== 'wait') {
+        expandedSteps.push({
+          ...step,
+          stepIndex: expandedSteps.length,
+          instruction: `Look for "${step.matchText || step.targetElement}".`
+        });
+      }
+      expandedSteps.push({
+        ...step,
+        stepIndex: expandedSteps.length,
+        instruction: confusionLevel === 'critical_guidance_required'
+          ? `Slowly ${step.instruction}. Wait after this action.`
+          : `${step.instruction}. Use the visible label "${step.matchText || step.targetElement}".`
+      });
+    }
+
+    return {
+      ...plan,
+      steps: expandedSteps,
+      estimatedDuration: Math.round((plan.estimatedDuration || 60) * (confusionLevel === 'critical_guidance_required' ? 1.8 : 1.35))
+    };
+  }
+
   static async generatePlanWithOllama(taskDescription, userId, language = 'en') {
     try {
       const ollamaUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/api';
@@ -204,7 +328,22 @@ Return ONLY valid JSON. No markdown, no explanations.
       }
 
       // Normalize action types
-      const validActionTypes = ['tap', 'swipe', 'input', 'scroll', 'openApp', 'long-press', 'double-tap', 'drag', 'wait', 'voice-input'];
+      const actionTypeMap = {
+        tap: 'tap',
+        swipe: 'swipe',
+        input: 'input',
+        scroll: 'scroll',
+        openapp: 'openApp',
+        'open-app': 'openApp',
+        longpress: 'long-press',
+        'long-press': 'long-press',
+        doubletap: 'double-tap',
+        'double-tap': 'double-tap',
+        drag: 'drag',
+        wait: 'wait',
+        voiceinput: 'voice-input',
+        'voice-input': 'voice-input'
+      };
       
       const normalizedDescription = taskDescription.toLowerCase();
       const explicitApp = this.findExplicitApp(normalizedDescription);
@@ -226,7 +365,7 @@ Return ONLY valid JSON. No markdown, no explanations.
           this.applyAppHints(
             (parsed.steps || []).map((step, idx) => {
           // Normalize action type
-          let actionType = (step.actionType || 'tap').toLowerCase();
+          let actionType = (step.actionType || 'tap').toString().trim().toLowerCase();
           
           // Handle compound actions like "scroll|tap" -> pick first one
           if (actionType.includes('|')) {
@@ -234,9 +373,7 @@ Return ONLY valid JSON. No markdown, no explanations.
           }
           
           // Ensure it's a valid enum value
-          if (!validActionTypes.includes(actionType)) {
-            actionType = 'tap'; // Default to tap if invalid
-          }
+          actionType = actionTypeMap[actionType] || 'tap';
 
           const fallbackText = (step.targetElement || step.instruction || '').toString().trim();
           const matchText = this.buildMatchText(step, fallbackText);
@@ -282,7 +419,7 @@ Return ONLY valid JSON. No markdown, no explanations.
         return {
           stepIndex: step.stepIndex ?? idx,
           instruction: step.instruction || 'Perform action',
-          actionType: (step.actionType || 'tap').toLowerCase(),
+            actionType: this.normalizeActionType(step.actionType || 'tap'),
           targetElement: step.targetElement || cleanedTarget,
           matchText,
           targetAppPackage: step.targetAppPackage || appPackageName
@@ -365,6 +502,28 @@ Return ONLY valid JSON. No markdown, no explanations.
       ),
       estimatedDuration: 60
     };
+  }
+
+  static normalizeActionType(actionType = 'tap') {
+    const normalized = actionType.toString().trim().toLowerCase();
+    const actionTypeMap = {
+      tap: 'tap',
+      swipe: 'swipe',
+      input: 'input',
+      scroll: 'scroll',
+      openapp: 'openApp',
+      'open-app': 'openApp',
+      longpress: 'long-press',
+      'long-press': 'long-press',
+      doubletap: 'double-tap',
+      'double-tap': 'double-tap',
+      drag: 'drag',
+      wait: 'wait',
+      voiceinput: 'voice-input',
+      'voice-input': 'voice-input'
+    };
+
+    return actionTypeMap[normalized] || 'tap';
   }
 
   static inferPrimaryPackage(parsedPackageName, normalizedDescription) {

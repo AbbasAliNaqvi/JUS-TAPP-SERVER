@@ -1,25 +1,8 @@
 import { Task, Session } from '../models/Task.js';
+import { UserIntelligenceProfile } from '../models/AdaptiveIntelligence.js';
 import TaskPlanService from '../services/taskPlanService.js';
 import { v4 as uuidv4 } from 'uuid';
-import mongoose from 'mongoose';
-
-const buildTaskLookup = (taskId) => (
-  mongoose.isValidObjectId(taskId)
-    ? { $or: [{ _id: taskId }, { publicId: taskId }] }
-    : { publicId: taskId }
-);
-
-const buildSessionLookup = (sessionId) => (
-  mongoose.isValidObjectId(sessionId)
-    ? { $or: [{ _id: sessionId }, { publicId: sessionId }] }
-    : { publicId: sessionId }
-);
-
-const notFoundError = (entity) => {
-  const error = new Error(`${entity} not found`);
-  error.statusCode = 404;
-  return error;
-};
+import { buildTaskLookup, buildSessionLookup, notFoundError } from '../utils/idLookup.js';
 
 const serializeTask = (task) => ({
   ...task.toObject(),
@@ -132,6 +115,80 @@ export const generateTaskPlan = async (taskDescription, userId, language = 'en')
   }
 };
 
+export const generateAdaptiveTaskPlan = async ({
+  taskDescription,
+  userId,
+  language = 'en',
+  confusionLevel = 'independent_user',
+  userCategory = 'moderate',
+  currentScreen = '',
+  recentBehavior = {}
+}) => {
+  try {
+    const guidanceTier = confusionLevel === 'critical_guidance_required'
+      ? 'critical'
+      : confusionLevel === 'high_assistance_needed'
+        ? 'detailed'
+        : confusionLevel === 'moderate_assistance_needed'
+          ? 'standard'
+          : 'minimal';
+    const plan = await TaskPlanService.generateAdaptiveTaskPlan(taskDescription, userId, {
+      language,
+      confusionLevel,
+      userCategory,
+      currentScreen,
+      recentBehavior
+    });
+
+    const task = new Task({
+      publicId: `task_${uuidv4().split('-')[0]}`,
+      userId,
+      description: taskDescription,
+      status: 'planning',
+      appPackageName: plan.appPackageName,
+      steps: plan.steps.map(step => ({
+        stepIndex: step.stepIndex,
+        instruction: step.instruction,
+        targetAppPackage: step.targetAppPackage,
+        targetElement: step.targetElement,
+        matchText: step.matchText,
+        actionType: step.actionType,
+        status: 'pending'
+      })),
+      estimatedDuration: plan.estimatedDuration,
+      metadata: {
+        language,
+        userAge: userCategory,
+        deviceInfo: JSON.stringify({
+          confusionLevel,
+          currentScreen,
+          recentBehavior
+        })
+      }
+    });
+
+    await task.save();
+
+    return {
+      success: true,
+      adaptive: true,
+      confusionLevel,
+      guidanceTier,
+      plan: {
+        taskId: task.publicId,
+        mongoId: task._id.toString(),
+        description: task.description,
+        appPackageName: task.appPackageName,
+        steps: task.steps,
+        estimatedDuration: task.estimatedDuration
+      }
+    };
+  } catch (error) {
+    console.error('Error generating adaptive task plan:', error);
+    throw error;
+  }
+};
+
 export const getTask = async (taskId) => {
   try {
     const task = await Task.findOne(buildTaskLookup(taskId));
@@ -241,11 +298,17 @@ export const createSession = async (userId, taskId, deviceInfo = {}) => {
       publicId: `session_${uuidv4().split('-')[0]}`,
       userId,
       taskId: task?._id,
+      totalSteps: task?.steps?.length || 0,
       deviceInfo,
       sessionStartTime: new Date()
     });
 
     await session.save();
+    await UserIntelligenceProfile.findOneAndUpdate(
+      { userId },
+      { $inc: { totalSessions: 1 }, $setOnInsert: { userId } },
+      { upsert: true }
+    );
     return serializeSession(session);
   } catch (error) {
     console.error('Error creating session:', error);

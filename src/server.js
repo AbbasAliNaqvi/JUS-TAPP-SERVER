@@ -7,6 +7,10 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import taskRoutes from './routes/taskRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
+import adaptiveRoutes from './routes/adaptiveRoutes.js';
+import guidanceRoutes from './routes/guidanceRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 import { connectDB } from './config/database.js';
 import TaskPlanService from './services/taskPlanService.js';
@@ -64,6 +68,10 @@ app.get('/', (req, res) => {
 // Routes
 app.use('/api/v1/task', taskRoutes);
 app.use('/api/v1/session', sessionRoutes);
+app.use('/api/v1/adaptive', adaptiveRoutes);
+app.use('/api/v1/guidance', guidanceRoutes);
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/analytics', analyticsRoutes);
 
 // Error Handler
 app.use(errorHandler);

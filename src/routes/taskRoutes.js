@@ -30,6 +30,23 @@ router.post('/plan', async (req, res, next) => {
   }
 });
 
+router.post('/plan/adaptive', async (req, res, next) => {
+  try {
+    const { taskDescription, userId } = req.body;
+
+    if (!taskDescription || !userId) {
+      return res.status(400).json({
+        error: 'taskDescription and userId are required'
+      });
+    }
+
+    const result = await taskController.generateAdaptiveTaskPlan(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 /**
  * @route GET /api/v1/task/user/:userId
  * @desc Get user's task history

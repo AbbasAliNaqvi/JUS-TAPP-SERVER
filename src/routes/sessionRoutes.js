@@ -1,5 +1,6 @@
 import express from 'express';
 import * as taskController from '../controllers/taskController.js';
+import * as adaptiveController from '../controllers/adaptiveController.js';
 
 const router = express.Router();
 
@@ -41,6 +42,53 @@ router.put('/:sessionId', async (req, res, next) => {
     const session = await taskController.updateSession(sessionId, updates);
 
     res.json(session);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route POST /api/v1/session/:sessionId/event
+ * @desc Record one accessibility/overlay interaction event
+ */
+router.post('/:sessionId/event', async (req, res, next) => {
+  try {
+    const result = await adaptiveController.recordInteractionEvent({
+      ...req.body,
+      sessionId: req.params.sessionId
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route POST /api/v1/session/:sessionId/guidance
+ * @desc Get adaptive next-step guidance for this session
+ */
+router.post('/:sessionId/guidance', async (req, res, next) => {
+  try {
+    const result = await adaptiveController.getAdaptiveStepGuidance({
+      ...req.body,
+      sessionId: req.params.sessionId
+    });
+
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route GET /api/v1/session/:sessionId/state
+ * @desc Get current adaptive session state
+ */
+router.get('/:sessionId/state', async (req, res, next) => {
+  try {
+    const result = await adaptiveController.getSessionState(req.params.sessionId);
+    res.json(result);
   } catch (error) {
     next(error);
   }
