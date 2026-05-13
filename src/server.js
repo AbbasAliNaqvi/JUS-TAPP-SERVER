@@ -11,9 +11,12 @@ import adaptiveRoutes from './routes/adaptiveRoutes.js';
 import guidanceRoutes from './routes/guidanceRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import showcaseRoutes from './routes/showcaseRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 import { connectDB } from './config/database.js';
 import TaskPlanService from './services/taskPlanService.js';
+import { existsSync } from 'fs';
+import { join } from 'path';
 
 dotenv.config();
 
@@ -24,7 +27,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5050;
+const HOST = process.env.HOST || '127.0.0.1';
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map(origin => origin.trim())
@@ -72,6 +76,19 @@ app.use('/api/v1/adaptive', adaptiveRoutes);
 app.use('/api/v1/guidance', guidanceRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/analytics', analyticsRoutes);
+app.use('/api/v1/showcase', showcaseRoutes);
+
+const frontendDist = join(process.cwd(), 'frontend', 'dist');
+if (existsSync(frontendDist)) {
+  app.use(express.static(frontendDist, { maxAge: '1y', immutable: true }));
+  app.get('/showcase', (req, res) => {
+    res.sendFile(join(frontendDist, 'index.html'));
+  });
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    return res.sendFile(join(frontendDist, 'index.html'));
+  });
+}
 
 // Error Handler
 app.use(errorHandler);
@@ -82,8 +99,8 @@ app.use((req, res) => {
 });
 
 // Start Server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`SmartAssist Backend running on port ${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`SmartAssist Backend running on ${HOST}:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
 });
 

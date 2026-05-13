@@ -130,16 +130,70 @@ export class TaskPlanService {
           }
         );
 
-        return this.parseTaskPlan(response.data.choices[0].message.content, taskDescription);
+        const parsedPlan = this.parseTaskPlan(response.data.choices[0].message.content, taskDescription);
+        return this.adaptPlanForGuidanceTier(parsedPlan, confusionLevel, userCategory);
       } catch (error) {
         console.warn('Adaptive Groq generation failed:', error.message);
       }
     }
 
-    return this.expandPlanForAssistanceLevel(
-      this.generateFallbackPlan(taskDescription),
-      confusionLevel
+    return this.adaptPlanForGuidanceTier(
+      this.expandPlanForAssistanceLevel(this.generateFallbackPlan(taskDescription), confusionLevel),
+      confusionLevel,
+      userCategory
     );
+  }
+
+  static adaptPlanForGuidanceTier(plan, confusionLevel, userCategory = 'moderate') {
+    const tier = confusionLevel || 'independent_user';
+    const steps = (plan.steps || []).map((step, index) => {
+      const target = (step.targetElement || step.matchText || '').toString().trim();
+      const baseInstruction = (step.instruction || '').toString().trim();
+
+      if (tier === 'independent_user') {
+        return {
+          ...step,
+          stepIndex: step.stepIndex ?? index,
+          instruction: baseInstruction.length > 60 ? baseInstruction.split('.')[0] : baseInstruction,
+          targetElement: target || step.targetElement,
+          matchText: target || step.matchText
+        };
+      }
+
+      if (tier === 'moderate_assistance_needed') {
+        return {
+          ...step,
+          stepIndex: step.stepIndex ?? index,
+          instruction: baseInstruction.endsWith('.') ? baseInstruction : `${baseInstruction}.`,
+          targetElement: target || step.targetElement,
+          matchText: target || step.matchText
+        };
+      }
+
+      const detailPrefix = tier === 'critical_guidance_required'
+        ? 'Go slowly. Look at the screen first. '
+        : 'Look carefully at the screen. ';
+      return {
+        ...step,
+        stepIndex: step.stepIndex ?? index,
+        instruction: `${detailPrefix}${baseInstruction.replace(/\.$/, '')}. Tap only the exact label "${target || step.matchText || step.targetElement}".`,
+        targetElement: target || step.targetElement,
+        matchText: target || step.matchText || step.targetElement
+      };
+    });
+
+    const durationMultiplier = tier === 'critical_guidance_required'
+      ? 1.8
+      : tier === 'moderate_assistance_needed'
+        ? 1.2
+        : 0.9;
+
+    return {
+      ...plan,
+      steps,
+      estimatedDuration: Math.max(30, Math.round((plan.estimatedDuration || 60) * durationMultiplier)),
+      userCategory
+    };
   }
 
   static buildAdaptiveTaskPrompt(taskDescription, {
