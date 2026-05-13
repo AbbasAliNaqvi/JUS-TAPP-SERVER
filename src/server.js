@@ -275,12 +275,31 @@ const showcaseHtml = `<!doctype html>
 </body>
 </html>`;
 
+const setShowcaseHeaders = (res) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "connect-src 'self' https://api.groq.com https://generativelanguage.googleapis.com https://localhost:11434 http://localhost:11434",
+      "font-src 'self' data:",
+      "img-src 'self' data:",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "form-action 'self'",
+      "frame-ancestors 'self'"
+    ].join('; ')
+  );
+};
+
 app.get('/showcase', (req, res) => {
+  setShowcaseHeaders(res);
   res.type('html').send(showcaseHtml);
 });
 
 app.get('*', (req, res, next) => {
   if (!req.path.startsWith('/api/')) {
+    setShowcaseHeaders(res);
     return res.type('html').send(showcaseHtml);
   }
   return next();
