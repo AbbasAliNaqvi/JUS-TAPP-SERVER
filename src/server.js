@@ -80,14 +80,22 @@ app.use('/api/v1/showcase', showcaseRoutes);
 const frontendDist = join(process.cwd(), 'frontend', 'dist');
 if (existsSync(frontendDist)) {
   app.use(express.static(frontendDist, { maxAge: '1y', immutable: true }));
-  app.get('/showcase', (req, res) => {
-    res.sendFile(join(frontendDist, 'index.html'));
-  });
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api/')) return next();
-    return res.sendFile(join(frontendDist, 'index.html'));
-  });
 }
+
+app.get('/showcase', (req, res, next) => {
+  if (existsSync(frontendDist)) {
+    return res.sendFile(join(frontendDist, 'index.html'));
+  }
+  return next();
+});
+
+app.get('*', (req, res, next) => {
+  if (existsSync(frontendDist) && !req.path.startsWith('/api/')) {
+    return res.sendFile(join(frontendDist, 'index.html'));
+  }
+  if (req.path.startsWith('/api/')) return next();
+  return next();
+});
 
 // Error Handler
 app.use(errorHandler);
