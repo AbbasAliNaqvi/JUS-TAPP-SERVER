@@ -1,0 +1,247 @@
+import { Task, Session } from '../models/Task.js';
+import TaskPlanService from '../services/taskPlanService.js';
+import { v4 as uuidv4 } from 'uuid';
+
+export const generateTaskPlan = async (taskDescription, userId, language = 'en') => {
+  try {
+    // Try Gemini first, fallback to Groq, then Ollama
+    let plan;
+    let lastError;
+    
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        plan = await TaskPlanService.generatePlanWithGemini(taskDescription, userId, language);
+      } catch (error) {
+        console.warn('Gemini failed, trying Groq:', error.message);
+        lastError = error;
+        if (process.env.GROQ_API_KEY) {
+          try {
+            plan = await TaskPlanService.generatePlanWithGroq(taskDescription, userId, language);
+          } catch (error) {
+            console.warn('Groq failed after Gemini:', error.message);
+            lastError = error;
+          }
+        }
+      }
+    }
+    
+    if (!plan && process.env.GROQ_API_KEY) {
+      try {
+        plan = await TaskPlanService.generatePlanWithGroq(taskDescription, userId, language);
+      } catch (error) {
+        console.warn('Groq failed, trying Ollama:', error.message);
+        lastError = error;
+      }
+    }
+    
+    if (!plan) {
+      try {
+        plan = await TaskPlanService.generatePlanWithOllama(taskDescription, userId, language);
+      } catch (error) {
+        console.warn('Ollama failed, using fallback plan:', error.message);
+        lastError = error;
+      }
+    }
+
+    if (!plan) {
+      console.warn('All providers failed, returning fallback plan');
+      plan = TaskPlanService.generateFallbackPlan(taskDescription);
+    }
+
+    // Save task to database
+    const task = new Task({
+      userId,
+      description: taskDescription,
+      status: 'planning',
+      appPackageName: plan.appPackageName,
+      steps: plan.steps.map(step => ({
+        stepIndex: step.stepIndex,
+        instruction: step.instruction,
+        targetAppPackage: step.targetAppPackage,
+        targetElement: step.targetElement,
+        matchText: step.matchText,
+        actionType: step.actionType,
+        status: 'pending'
+      })),
+      estimatedDuration: plan.estimatedDuration,
+      metadata: {
+        language,
+        userAge: 'unknown',
+        deviceInfo: 'unknown'
+      }
+    });
+
+    await task.save();
+
+    return {
+      success: true,
+      plan: {
+        taskId: task._id.toString(),
+        description: task.description,
+        appPackageName: task.appPackageName,
+        steps: task.steps,
+        estimatedDuration: task.estimatedDuration
+      }
+    };
+  } catch (error) {
+    console.error('Error generating task plan:', error);
+    const fallbackPlan = TaskPlanService.generateFallbackPlan(taskDescription);
+    return {
+      success: true,
+      plan: {
+        taskId: fallbackPlan.taskId,
+        description: fallbackPlan.description,
+        appPackageName: fallbackPlan.appPackageName,
+        steps: fallbackPlan.steps,
+        estimatedDuration: fallbackPlan.estimatedDuration
+      }
+    };
+  }
+};
+
+export const getTask = async (taskId) => {
+  try {
+    const task = await Task.findById(taskId);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+    return task;
+  } catch (error) {
+    console.error('Error fetching task:', error);
+    throw error;
+  }
+};
+
+export const updateTaskStep = async (taskId, stepIndex, status) => {
+  try {
+    const task = await Task.findById(taskId);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+
+    if (stepIndex < 0 || stepIndex >= task.steps.length) {
+      throw new Error('Invalid step index');
+    }
+
+    task.steps[stepIndex].status = status;
+    if (status === 'executing') {
+      task.steps[stepIndex].startedAt = task.steps[stepIndex].startedAt || new Date();
+      task.status = 'executing';
+      task.currentStepIndex = Math.max(task.currentStepIndex || 0, stepIndex);
+    }
+    if (status === 'completed') {
+      task.steps[stepIndex].completedAt = new Date();
+      task.steps[stepIndex].startedAt = task.steps[stepIndex].startedAt || new Date();
+      task.currentStepIndex = Math.min(stepIndex + 1, task.steps.length);
+    }
+
+    // Check if all steps completed
+    const allCompleted = task.steps.every(s => s.status === 'completed');
+    if (allCompleted) {
+      task.status = 'completed';
+      task.completedAt = new Date();
+    }
+
+    await task.save();
+    return task;
+  } catch (error) {
+    console.error('Error updating task step:', error);
+    throw error;
+  }
+};
+
+export const getMasterStep = async (taskId) => {
+  try {
+    const task = await Task.findById(taskId);
+    if (!task) {
+      throw new Error('Task not found');
+    }
+
+    const nextStep = task.steps.find(step => step.status !== 'completed') || null;
+    const highlightText = nextStep?.matchText || nextStep?.targetElement || nextStep?.instruction || '';
+
+    return {
+      taskId: task._id.toString(),
+      status: task.status,
+      currentStepIndex: task.currentStepIndex,
+      totalSteps: task.steps.length,
+      nextStep,
+      highlightText
+    };
+  } catch (error) {
+    console.error('Error fetching master step:', error);
+    throw error;
+  }
+};
+
+export const getUserTasks = async (userId, limit = 20, skip = 0) => {
+  try {
+    const tasks = await Task.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip);
+    
+    const total = await Task.countDocuments({ userId });
+
+    return {
+      tasks,
+      total,
+      limit,
+      skip,
+      hasMore: skip + limit < total
+    };
+  } catch (error) {
+    console.error('Error fetching user tasks:', error);
+    throw error;
+  }
+};
+
+export const createSession = async (userId, taskId, deviceInfo = {}) => {
+  try {
+    const session = new Session({
+      userId,
+      taskId,
+      deviceInfo,
+      sessionStartTime: new Date()
+    });
+
+    await session.save();
+    return session;
+  } catch (error) {
+    console.error('Error creating session:', error);
+    throw error;
+  }
+};
+
+export const updateSession = async (sessionId, updates) => {
+  try {
+    const session = await Session.findByIdAndUpdate(
+      sessionId,
+      updates,
+      { new: true }
+    );
+    
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    return session;
+  } catch (error) {
+    console.error('Error updating session:', error);
+    throw error;
+  }
+};
+
+export const getUserSessions = async (userId, limit = 50) => {
+  try {
+    const sessions = await Session.find({ userId })
+      .sort({ sessionStartTime: -1 })
+      .limit(limit)
+      .populate('taskId', 'description status');
+
+    return sessions;
+  } catch (error) {
+    console.error('Error fetching user sessions:', error);
+    throw error;
+  }
+};
