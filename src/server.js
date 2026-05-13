@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { readFileSync, readdirSync } from 'fs';
 import taskRoutes from './routes/taskRoutes.js';
 import sessionRoutes from './routes/sessionRoutes.js';
 import adaptiveRoutes from './routes/adaptiveRoutes.js';
@@ -78,20 +79,32 @@ app.use('/api/v1/analytics', analyticsRoutes);
 app.use('/api/v1/showcase', showcaseRoutes);
 
 const frontendDist = join(process.cwd(), 'frontend', 'dist');
+const getShowcaseHtml = () => {
+  const indexPath = join(frontendDist, 'index.html');
+  let html = readFileSync(indexPath, 'utf8');
+  const assetDir = join(frontendDist, 'assets');
+  const cssFile = readdirSync(assetDir).find(file => file.endsWith('.css'));
+  if (cssFile) {
+    const css = readFileSync(join(assetDir, cssFile), 'utf8');
+    html = html.replace('</head>', `<style>${css}</style></head>`);
+  }
+  return html;
+};
+
 if (existsSync(frontendDist)) {
   app.use(express.static(frontendDist, { maxAge: '1y', immutable: true }));
 }
 
 app.get('/showcase', (req, res, next) => {
   if (existsSync(frontendDist)) {
-    return res.sendFile(join(frontendDist, 'index.html'));
+    return res.type('html').send(getShowcaseHtml());
   }
   return next();
 });
 
 app.get('*', (req, res, next) => {
   if (existsSync(frontendDist) && !req.path.startsWith('/api/')) {
-    return res.sendFile(join(frontendDist, 'index.html'));
+    return res.type('html').send(getShowcaseHtml());
   }
   if (req.path.startsWith('/api/')) return next();
   return next();
