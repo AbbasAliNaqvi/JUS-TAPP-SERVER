@@ -28,7 +28,6 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5050;
-const HOST = process.env.HOST || '0.0.0.0';
 const corsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map(origin => origin.trim())
@@ -99,8 +98,8 @@ app.use((req, res) => {
 });
 
 // Start Server
-app.listen(PORT, HOST, () => {
-  console.log(`SmartAssist Backend running on ${HOST}:${PORT}`);
+app.listen(PORT, () => {
+  console.log(`SmartAssist Backend running on 0.0.0.0:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV}`);
 });
 
